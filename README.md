@@ -28,13 +28,17 @@ where $\bar{x}_0$ is the measured initial state.
 Define the stacked decision vector as
 
 $$
-w
-=
-\operatorname{col}
-\left(
-x_1,\ldots,x_{n+1},
-u_1,\ldots,u_n
-\right).
+w =
+\begin{bmatrix}
+x_1 \\
+x_2 \\
+\vdots \\
+x_{N+1} \\
+u_1 \\
+u_2 \\
+\vdots \\
+u_N
+\end{bmatrix}
 $$
 
 The QP is
@@ -61,16 +65,12 @@ $$
 The quadratic cost matrix is
 
 $$
-\boxed{
-H_{\mathrm{qp}}
-=
-\operatorname{blkdiag}
-\left(
-I_n\otimes Q,\;
-Q_{\mathrm{end}},\;
-I_n\otimes R
-\right).
-}
+H_{\mathrm{QP}} = 
+\begin{bmatrix}
+I_N \otimes Q & 0 & 0 \\
+0 & Q_{\mathrm{end}} & 0 \\
+0 & 0 & I_N \otimes R
+\end{bmatrix}
 $$
 
 ### Linear cost vector
@@ -78,48 +78,51 @@ $$
 Define the stacked reference trajectories
 
 $$
-\bar{x}^{\mathrm{ref}}
-=
-\operatorname{col}
-\left(
-x_1^{\mathrm{ref}},\ldots,x_n^{\mathrm{ref}}
-\right),
+\bar{x}^{\mathrm{ref}} = 
+\begin{bmatrix}
+x_1^{\mathrm{ref}} \\
+\vdots \\
+x_n^{\mathrm{ref}}
+\end{bmatrix},
 \qquad
-\bar{u}^{\mathrm{ref}}
-=
-\operatorname{col}
-\left(
-u_1^{\mathrm{ref}},\ldots,u_n^{\mathrm{ref}}
-\right).
+\bar{u}^{\mathrm{ref}} = 
+\begin{bmatrix}
+u_1^{\mathrm{ref}} \\
+\vdots \\
+u_n^{\mathrm{ref}}
+\end{bmatrix}
 $$
 
 Then
 
 $$
-\boxed{
-c_{\mathrm{qp}}
-=
--
-\operatorname{col}
-\left(
-(I_n\otimes Q)\bar{x}^{\mathrm{ref}},
-\;
-Q_{\mathrm{end}}x_{n+1}^{\mathrm{ref}},
-\;
-(I_n\otimes R)\bar{u}^{\mathrm{ref}}
-\right).
-}
+c_{\mathrm{QP}} = -
+\begin{bmatrix}
+(I_N \otimes Q) \bar{x}^{\mathrm{ref}} \\
+Q_{\mathrm{end}} x_{N+1}^{\mathrm{ref}} \\
+(I_N \otimes R) \bar{u}^{\mathrm{ref}}
+\end{bmatrix}
 $$
 
 ### Equality constraint matrix
 
-Let $S_n\in\mathbb{R}^{(n+1)\times(n+1)}$ denote the lower-shift matrix,
+Let 
 
 $$
-S_n
-=
-\sum_{k=1}^{n}
-e_{k+1}e_k^\top,
+S_n \in \mathbb{R}^{(N+1) \times (N+1)}
+$$ 
+
+denote the lower-shift matrix,
+
+$$
+S_N = 
+\begin{bmatrix}
+0 & 0 & \cdots & 0 & 0 \\
+1 & 0 & \cdots & 0 & 0 \\
+0 & 1 & \cdots & 0 & 0 \\
+\vdots & \vdots & \ddots & \vdots & \vdots \\
+0 & 0 & \cdots & 1 & 0
+\end{bmatrix}
 $$
 
 where $e_k$ is the $k$-th canonical basis vector.
@@ -127,39 +130,48 @@ where $e_k$ is the $k$-th canonical basis vector.
 Then the state-dynamics matrix is
 
 $$
-\boxed{
-C_x
-=
-I_{n+1}\otimes I_{n_x}
--
-S_n\otimes A.
-}
+C_x = I_{N+1} \otimes I_{n_x} - S_N \otimes A
+$$
+
+$$
+C_x = 
+\begin{bmatrix}
+I & 0 & 0 & \cdots & 0 \\
+-A & I & 0 & \cdots & 0 \\
+0 & -A & I & \cdots & 0 \\
+\vdots & \ddots & \ddots & \ddots & \vdots \\
+0 & \cdots & 0 & -A & I
+\end{bmatrix}
 $$
 
 The input matrix is
 
 $$
-\boxed{
-C_u
-=
+C_u = 
 \begin{bmatrix}
-0_{n_x\times nn_u}
-\\
--I_n\otimes B
-\end{bmatrix}.
-}
+0_{n_x \times N n_u} \\
+-I_N \otimes B
+\end{bmatrix}
+$$
+
+$$
+C_u = 
+\begin{bmatrix}
+0 & 0 & \cdots & 0 \\
+-B & 0 & \cdots & 0 \\
+0 & -B & \cdots & 0 \\
+\vdots & \ddots & \ddots & \vdots \\
+0 & \cdots & 0 & -B
+\end{bmatrix}
 $$
 
 Hence,
 
 $$
-\boxed{
-A_{\mathrm{qp}}
-=
+A_{\mathrm{QP}} = 
 \begin{bmatrix}
 C_x & C_u
-\end{bmatrix}.
-}
+\end{bmatrix}
 $$
 
 ### Equality-constraint right-hand side
@@ -167,24 +179,17 @@ $$
 The initial condition is imposed through
 
 $$
-\boxed{
-b_{\mathrm{qp}}
-=
-\operatorname{col}
-\left(
-x_0,\;
-0_{n n_x}
-\right).
-}
+b_{\mathrm{QP}} = 
+\begin{bmatrix}
+x_0 \\
+0_{N n_x \times 1}
+\end{bmatrix}
 $$
 
 Thus the equality constraints compactly represent
 
 $$
-x_1=x_0,
-\qquad
-x_{k+1}=Ax_k+Bu_k,
-\quad k=1,\ldots,n.
+x_1 = x_0, \qquad x_{k+1} = A x_k + B u_k, \qquad k = 1, \dots, N.
 $$
 
 ### Box constraints
@@ -192,45 +197,27 @@ $$
 Define
 
 $$
-\bar{x}_{\mathrm{lb}}
-=
-\mathbf{1}_{n+1}\otimes x_{\mathrm{lb}},
-\qquad
-\bar{x}_{\mathrm{ub}}
-=
-\mathbf{1}_{n+1}\otimes x_{\mathrm{ub}},
+\bar{x}_{\mathrm{lb}} = \mathbf{1}_{N+1} \otimes x_{\mathrm{lb}}, \qquad \bar{x}_{\mathrm{ub}} = \mathbf{1}_{N+1} \otimes x_{\mathrm{ub}},
 $$
 
 and
 
 $$
-\bar{u}_{\mathrm{lb}}
-=
-\mathbf{1}_{n}\otimes u_{\mathrm{lb}},
-\qquad
-\bar{u}_{\mathrm{ub}}
-=
-\mathbf{1}_{n}\otimes u_{\mathrm{ub}}.
+\bar{u}_{\mathrm{lb}} = \mathbf{1}_N \otimes u_{\mathrm{lb}}, \qquad \bar{u}_{\mathrm{ub}} = \mathbf{1}_N \otimes u_{\mathrm{ub}}.
 $$
 
 Then
 
 $$
-\boxed{
-w_{\mathrm{lb}}
-=
-\operatorname{col}
-\left(
-\bar{x}_{\mathrm{lb}},
+w_{\mathrm{lb}} = 
+\begin{bmatrix}
+\bar{x}_{\mathrm{lb}} \\
 \bar{u}_{\mathrm{lb}}
-\right),
+\end{bmatrix},
 \qquad
-w_{\mathrm{ub}}
-=
-\operatorname{col}
-\left(
-\bar{x}_{\mathrm{ub}},
+w_{\mathrm{ub}} = 
+\begin{bmatrix}
+\bar{x}_{\mathrm{ub}} \\
 \bar{u}_{\mathrm{ub}}
-\right).
-}
+\end{bmatrix}
 $$
