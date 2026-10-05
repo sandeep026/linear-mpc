@@ -252,34 +252,43 @@ $$
 
 The state part of the equality matrix is
 
+
 $$
 C_x =
-\begin{bmatrix}
-I & 0 & 0 & \cdots & 0 \\
--A & I & 0 & \cdots & 0 \\
-0 & -A & I & \cdots & 0 \\
-\vdots & \ddots & \ddots & \ddots & \vdots \\
-0 & \cdots & 0 & -A & I
-\end{bmatrix}.
+I_{N+1} \otimes I_{n_x}
+-
+L_{N+1} \otimes A,
 $$
 
-The input part is
+where $L_{N+1}$ is the strictly lower shift matrix
+
+$$
+L_{N+1} =
+\begin{bmatrix}
+0 & 0 & \cdots & 0 \\
+1 & 0 & \cdots & 0 \\
+0 & 1 & \ddots & \vdots \\
+\vdots & \ddots & \ddots & 0 \\
+0 & \cdots & 1 & 0
+\end{bmatrix}
+$$
+
 
 $$
 C_u =
 \begin{bmatrix}
-0 & 0 & \cdots & 0 \\
--B & 0 & \cdots & 0 \\
-0 & -B & \cdots & 0 \\
-\vdots & \ddots & \ddots & \vdots \\
-0 & \cdots & -B
-\end{bmatrix}.
+0_{n_x \times N n_u} \\
+-\left(I_N \otimes B\right)
+\end{bmatrix}
 $$
 
 The complete equality matrix is
 
 $$
-A_{QP} = \begin{bmatrix} C_x & C_u \end{bmatrix}.
+A_{QP} =
+\begin{bmatrix}
+C_x & C_u
+\end{bmatrix}.
 $$
 
 The right-hand side is
@@ -295,47 +304,20 @@ b_{QP} =
 $$
 
 The first block row enforces $x_1=\bar{x}_0$. The remaining block rows enforce the dynamics for $k=1,\ldots,N$.
-
 ## Bound Construction
 
-The state bounds are repeated for all $N+1$ states:
+The state and input bounds are compactly represented using Kronecker products:
 
 $$
-lb_x =
-\begin{bmatrix}
-x_{lb} \\
-x_{lb} \\
-\vdots \\
-x_{lb}
-\end{bmatrix},
+lb_x = \mathbf{1}_{N+1} \otimes x_{lb},
 \qquad
-ub_x =
-\begin{bmatrix}
-x_{ub} \\
-x_{ub} \\
-\vdots \\
-x_{ub}
-\end{bmatrix}.
+ub_x = \mathbf{1}_{N+1} \otimes x_{ub},
 $$
 
-The input bounds are repeated for all $N$ controls:
-
 $$
-lb_u =
-\begin{bmatrix}
-u_{lb} \\
-u_{lb} \\
-\vdots \\
-u_{lb}
-\end{bmatrix},
+lb_u = \mathbf{1}_{N} \otimes u_{lb},
 \qquad
-ub_u =
-\begin{bmatrix}
-u_{ub} \\
-u_{ub} \\
-\vdots \\
-u_{ub}
-\end{bmatrix}.
+ub_u = \mathbf{1}_{N} \otimes u_{ub}.
 $$
 
 The complete lower and upper bounds are
@@ -345,19 +327,14 @@ lb_{QP} =
 \begin{bmatrix}
 lb_x \\
 lb_u
-\end{bmatrix}
-$$
-
-and
-
-$$
+\end{bmatrix},
+\qquad
 ub_{QP} =
 \begin{bmatrix}
 ub_x \\
 ub_u
 \end{bmatrix}.
 $$
-
 ## QP Matrix and Vector Dimensions
 
 Let
@@ -396,70 +373,3 @@ $$
 lb_{QP} \leq w \leq ub_{QP}.
 $$
 
-## Checks Implemented in the Class
-
-The class checks the problem data before the QP is generated.
-
-### Conversion to NumPy Arrays
-
-The matrix and vector inputs are converted to NumPy arrays with `float64` values.
-
-### Symmetry and Positive Semidefiniteness
-
-`Q` and `Qend` must be symmetric and positive semidefinite.
-
-`R` must be symmetric and positive definite.
-
-The checks use numerical tolerances to account for floating-point error.
-
-### Dimension Checks
-
-The following dimensions are checked:
-
-| Component | Required dimension |
-| --------- | ------------------ |
-| `A`       | `(nx, nx)`         |
-| `B`       | `(nx, nu)`         |
-| `Q`       | `(nx, nx)`         |
-| `R`       | `(nu, nu)`         |
-| `Qend`    | `(nx, nx)`         |
-| `x0`      | `(nx, 1)`          |
-| `x_ref`   | `(nx, N+1)`        |
-| `u_ref`   | `(nu, N)`          |
-| `x_lb`    | `(nx, 1)`          |
-| `x_ub`    | `(nx, 1)`          |
-| `u_lb`    | `(nu, 1)`          |
-| `u_ub`    | `(nu, 1)`          |
-
-Here, $N$ is the value of `intervals`.
-
-### Bound Checks
-
-The class checks
-
-$$
-x_{lb} \leq x_{ub}
-$$
-
-and
-
-$$
-u_{lb} \leq u_{ub}.
-$$
-
-Invalid bounds raise a validation error.
-
-## QP Output
-
-The QP components are returned as a dictionary ready to be passed into a standard QP solver:
-
-```text
-{
-    "H":  H_QP,
-    "c":  c_QP,
-    "A":  A_QP,
-    "b":  b_QP,
-    "lb": lb_QP,
-    "ub": ub_QP
-}
-```
