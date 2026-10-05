@@ -310,3 +310,13 @@ a[1].grid(True)
 <p align="center">
   <img src="lmpc.png" alt="Alt text">
 </p>
+
+### QP matrices construction benchmark
+
+For a 12 state, 4 control quadcopter system, QP matrices can be generated within 0.5 seconds for upto a million intervals.
+
+<p align="center">
+  <img src="bench.png" alt="Alt text">
+</p>
+
+
