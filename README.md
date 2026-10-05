@@ -323,10 +323,6 @@ a[1].grid(True)
 
 #### Example 2 - taken from [syscop](https://www.syscop.de/files/2023ss/MPC4RES/MPCforRES_Exercise3_sol.pdf) homework problem
 
-<p align="center">
-  <img src="syscop.png" alt="Alt text">
-</p>
-
 ```python
 import matplotlib.pyplot as plt
 #!pip install qpsolvers
@@ -413,6 +409,10 @@ a[1].set_title("Control Input")
 a[1].set_xlabel("Time (s)")
 a[1].grid(True)
 ```
+
+<p align="center">
+  <img src="syscop.png" alt="Alt text">
+</p>
 
 ### QP matrices construction benchmark
 
