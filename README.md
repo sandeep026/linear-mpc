@@ -1,127 +1,228 @@
 # Linear MPC
 
-A lightweight implementation of **discrete-time linear Model Predictive Control (MPC)** that constructs the resulting optimization problem directly as a **sparse quadratic program (QP)** using NumPy and SciPy.
+A lightweight implementation of **discrete-time linear model predictive control (LMPC)** that formulates the MPC optimization problem as a structured sparse quadratic program.
 
-The implementation is designed for long prediction horizons where constructing dense lifted MPC matrices would be unnecessarily expensive in both memory and computation.
+The implementation uses:
+
+* NumPy for numerical model and MPC data
+* SciPy sparse matrices for the lifted QP
+* Pydantic for input validation
 
 ---
 
-## Overview
+# 1. Linear MPC problem
 
-Consider the discrete-time linear system
+Consider a continuous-time linear system
+
+$$
+\dot{x}(t) = A_c x(t) + B_c u(t)
+$$
+
+with state
+
+$$
+x(t) \in \mathbb{R}^{n_x}
+$$
+
+and input
+
+$$
+u(t) \in \mathbb{R}^{n_u}.
+$$
+
+The controller uses a discrete-time model obtained from the continuous-time system. With a sampling time \(T_s\), the input is assumed to be held constant over each sampling interval using **zero-order hold (ZOH)**:
+
+$$
+u(t) = u_k
+$$
+
+for
+
+$$
+t \in [kT_s,(k+1)T_s).
+$$
+
+The resulting discrete-time model is
+
+$$
+x_{k+1} = A x_k + B u_k.
+$$
+
+Here,
+
+* \(A \in \mathbb{R}^{n_x \times n_x}\)
+* \(B \in \mathbb{R}^{n_x \times n_u}\)
+
+and \(x_k\) and \(u_k\) denote the state and input at sampling instant \(k\).
+
+---
+
+# 2. Prediction horizon and indexing
+
+Let the prediction horizon contain \(N\) control intervals.
+
+The predicted states are indexed as
+
+$$
+x_1,x_2,\ldots,x_{N+1}.
+$$
+
+The predicted control inputs are indexed as
+
+$$
+u_1,u_2,\ldots,u_N.
+$$
+
+The first predicted state is the current measured state:
+
+$$
+x_1 = x_0.
+$$
+
+The dynamics are therefore
 
 $$
 x_{k+1}=Ax_k+Bu_k,
+\qquad
+k=1,\ldots,N.
+$$
+
+Thus the final predicted state is \(x_{N+1}\).
+
+This indexing gives the following interpretation:
+
+| Quantity      |            Dimension | Meaning                                                  |
+| ------------- | -------------------: | -------------------------------------------------------- |
+| \(x_k\)       |     \(n_x \times 1\) | State at prediction step \(k\), \(k=1,\ldots,N+1\)       |
+| \(u_k\)       |     \(n_u \times 1\) | Control input at prediction step \(k\), \(k=1,\ldots,N\) |
+| \(x_0\)       |     \(n_x \times 1\) | Measured/current state                                   |
+| \(x_k^{ref}\) |     \(n_x \times 1\) | State reference at step \(k\)                            |
+| \(u_k^{ref}\) |     \(n_u \times 1\) | Input reference at step \(k\)                            |
+| \(A\)         |   \(n_x \times n_x\) | Discrete-time state matrix                               |
+| \(B\)         |   \(n_x \times n_u\) | Discrete-time input matrix                               |
+| \(Q\)         |   \(n_x \times n_x\) | Stage-state weighting matrix                             |
+| \(Q_{end}\)   |   \(n_x \times n_x\) | Terminal-state weighting matrix                          |
+| \(R\)         |   \(n_u \times n_u\) | Input weighting matrix                                   |
+| \(x_{lb}\)    |     \(n_x \times 1\) | State lower bound                                        |
+| \(x_{ub}\)    |     \(n_x \times 1\) | State upper bound                                        |
+| \(u_{lb}\)    |     \(n_u \times 1\) | Input lower bound                                        |
+| \(u_{ub}\)    |     \(n_u \times 1\) | Input upper bound                                        |
+| \(x_{ref}\)   | \(n_x \times (N+1)\) | Complete state reference trajectory                      |
+| \(u_{ref}\)   |     \(n_u \times N\) | Complete input reference trajectory                      |
+
+The state reference contains
+
+$$
+x_{ref}
+=
+[x_1^{ref},\ldots,x_{N+1}^{ref}]
+$$
+
+and the input reference contains
+
+$$
+u_{ref}
+=
+[u_1^{ref},\ldots,u_N^{ref}].
+$$
+
+---
+
+# 3. Weighted norms
+
+For a vector \(v\) and positive semidefinite matrix \(W\), define the weighted squared norm as
+
+$$
+\|v\|_W^2 = v^T W v.
+$$
+
+Using this notation makes the MPC objective compact and makes the role of each weighting matrix clear.
+
+---
+
+# 4. Discrete linear MPC problem
+
+The LMPC problem is
+
+$$
+\begin{aligned}
+\min_{\{x_k,u_k\}}
+\quad&
+\frac{1}{2}
+\sum_{k=1}^{N}
+\|x_k-x_k^{ref}\|_Q^2
+\\
+&+
+\frac{1}{2}
+\|x_{N+1}-x_{N+1}^{ref}\|_{Q_{end}}^2
+\\
+&+
+\frac{1}{2}
+\sum_{k=1}^{N}
+\|u_k-u_k^{ref}\|_R^2
+\end{aligned}
+$$
+
+subject to
+
+$$
+x_1=x_0
+$$
+
+and
+
+$$
+x_{k+1}=Ax_k+Bu_k,
+\qquad
+k=1,\ldots,N.
+$$
+
+The state and input constraints are
+
+$$
+x_{lb}\le x_k\le x_{ub},
+\qquad
+k=1,\ldots,N+1
+$$
+
+and
+
+$$
+u_{lb}\le u_k\le u_{ub},
+\qquad
+k=1,\ldots,N.
+$$
+
+The first state \(x_1\) is therefore fixed to the current measured state \(x_0\), while \(x_2,\ldots,x_{N+1}\) are predicted states.
+
+---
+
+# 5. Decision vector
+
+All predicted states and control inputs are stacked into one decision vector:
+
+$$
+w =
+\begin{bmatrix}
+x_1\\
+x_2\\
+\vdots\\
+x_N\\
+x_{N+1}\\
+u_1\\
+u_2\\
+\vdots\\
+u_N
+\end{bmatrix}.
+$$
+
+The dimensions are
+
+$$
+w \in \mathbb{R}^{n_w}
 $$
 
 with
-
-$$
-x_k\in\mathbb{R}^{n_x},
-\qquad
-u_k\in\mathbb{R}^{n_u}.
-$$
-
-Given a prediction horizon of \(N\) intervals, the MPC controller minimizes a quadratic tracking cost subject to the system dynamics and box constraints on states and inputs.
-
-The implementation converts this MPC problem into the standard quadratic-programming form
-
-$$
-\begin{aligned}
-\min_w\quad&
-\frac12 w^T P w+q^T w\\
-\text{s.t.}\quad&
-A_{\mathrm{qp}}w=b_{\mathrm{qp}},\\
-&
-w_{\mathrm{lb}}\le w\le w_{\mathrm{ub}}.
-\end{aligned}
-$$
-
-The resulting `P` and `A` matrices are sparse SciPy CSC matrices, while the vectors are dense NumPy arrays.
-
----
-
-# 1. MPC problem
-
-The controller solves
-
-$$
-\boxed{
-\begin{aligned}
-\min_{\{x_k,u_k\}}\quad&
-\frac12
-\sum_{k=0}^{N-1}
-(x_k-x_k^{\mathrm{ref}})^T
-Q
-(x_k-x_k^{\mathrm{ref}})
-\\
-&+
-\frac12
-(x_N-x_N^{\mathrm{ref}})^T
-Q_{\mathrm{end}}
-(x_N-x_N^{\mathrm{ref}})
-\\
-&+
-\frac12
-\sum_{k=0}^{N-1}
-(u_k-u_k^{\mathrm{ref}})^T
-R
-(u_k-u_k^{\mathrm{ref}})
-\\[1mm]
-\text{s.t.}\quad&
-x_{k+1}=Ax_k+Bu_k,
-\qquad k=0,\ldots,N-1,
-\\
-&
-x_{\mathrm{lb}}\le x_k\le x_{\mathrm{ub}},
-\qquad k=0,\ldots,N,
-\\
-&
-u_{\mathrm{lb}}\le u_k\le u_{\mathrm{ub}},
-\qquad k=0,\ldots,N-1,
-\\
-&
-x_0=\hat{x}_0.
-\end{aligned}
-}
-$$
-
-Here:
-
-* \(x_0=\hat{x}_0\) is the measured/current state.
-* \(x_k^{\mathrm{ref}}\) is the desired state trajectory.
-* \(u_k^{\mathrm{ref}}\) is the desired input trajectory.
-* \(Q\succeq0\) weights state-tracking error.
-* \(Q_{\mathrm{end}}\succeq0\) is the terminal-state weight.
-* \(R\succ0\) weights input-tracking error.
-
-There is no separate terminal set in this formulation. The terminal state is subject to the same state box bounds as the other predicted states.
-
----
-
-# 2. Decision-vector construction
-
-The implementation uses a **lifted formulation**, meaning that all predicted states and inputs are optimization variables.
-
-The decision vector is
-
-$$
-\boxed{
-w=
-\begin{bmatrix}
-x_0\\
-x_1\\
-\vdots\\
-x_N\\
-u_0\\
-u_1\\
-\vdots\\
-u_{N-1}
-\end{bmatrix}.
-}
-$$
-
-Therefore the total number of decision variables is
 
 $$
 \boxed{
@@ -129,884 +230,547 @@ n_w=(N+1)n_x+Nn_u.
 }
 $$
 
-This ordering is important because it determines the structure of every QP matrix.
-
-For example, with
-
-```text
-N  = 1000
-nx = 12
-nu = 4
-```
-
-the decision vector contains
+The corresponding reference vector is
 
 $$
-(1000+1)12+1000(4)=16012
-$$
-
-variables.
-
----
-
-# 3. From MPC cost to QP cost
-
-Define the reference vector
-
-$$
-w_{\mathrm{ref}}=
+w_{ref} =
 \begin{bmatrix}
-x_0^{\mathrm{ref}}\\
-x_1^{\mathrm{ref}}\\
+x_1^{ref}\\
+x_2^{ref}\\
 \vdots\\
-x_N^{\mathrm{ref}}\\
-u_0^{\mathrm{ref}}\\
+x_N^{ref}\\
+x_{N+1}^{ref}\\
+u_1^{ref}\\
+u_2^{ref}\\
 \vdots\\
-u_{N-1}^{\mathrm{ref}}
+u_N^{ref}
 \end{bmatrix}.
 $$
 
-Define the block-diagonal weighting matrix
+---
+
+# 6. Conversion of the cost to a QP
+
+The first step is to collect all weighting matrices into one block-diagonal matrix:
 
 $$
-H=
+H_{QP}
+=
 \operatorname{blkdiag}
 \left(
 \underbrace{Q,\ldots,Q}_{N},
-Q_{\mathrm{end}},
+Q_{end},
 \underbrace{R,\ldots,R}_{N}
 \right).
 $$
 
-The tracking cost can then be written compactly as
-
-$$
-J=
-\frac12
-(w-w_{\mathrm{ref}})^T
-H
-(w-w_{\mathrm{ref}}).
-$$
-
-Expanding,
-
-$$
-J=
-\frac12w^THw
--w_{\mathrm{ref}}^THw
-+
-\frac12w_{\mathrm{ref}}^THw_{\mathrm{ref}}.
-$$
-
-The final term depends only on the reference and therefore does not affect the optimizer.
-
-Thus the QP can use
+Its dimension is
 
 $$
 \boxed{
-P=H
+H_{QP}
+\in
+\mathbb{R}^{n_w\times n_w}.
 }
 $$
 
-and
+Using the decision vector and reference vector, the complete tracking cost can be written as
 
 $$
-\boxed{
-q=-Hw_{\mathrm{ref}}.
-}
-$$
-
-This gives the standard QP objective
-
-$$
-\boxed{
-\frac12w^TPw+q^Tw.
-}
-$$
-
-That is exactly the convention used by `qpsolvers`.
-
----
-
-## Efficient construction of the linear term
-
-There is no need to explicitly construct the large vector \(w_{\mathrm{ref}}\) and multiply the large sparse Hessian by it.
-
-Because \(H\) is block diagonal,
-
-$$
-Hw_{\mathrm{ref}}
+J
 =
+\frac{1}{2}
+(w-w_{ref})^T
+H_{QP}
+(w-w_{ref}).
+$$
+
+Expanding the quadratic gives
+
+$$
+J
+=
+\frac{1}{2}w^T H_{QP} w
+-
+w_{ref}^T H_{QP}w
++
+\frac{1}{2}
+w_{ref}^T H_{QP}w_{ref}.
+$$
+
+The final term does not depend on the optimization variable \(w\). It is therefore a constant and can be ignored when solving the optimization problem.
+
+The objective can consequently be written as
+
+$$
+\boxed{
+J
+=
+\frac{1}{2}w^T H_{QP}w
++
+c_{QP}^T w
+}
+$$
+
+where
+
+$$
+\boxed{
+c_{QP}=-H_{QP}w_{ref}.
+}
+$$
+
+Because \(H_{QP}\) is block diagonal, the linear term can also be constructed block by block:
+
+$$
+c_{QP}
+=
+-
 \begin{bmatrix}
-Qx_0^{\mathrm{ref}}\\
+Qx_1^{ref}\\
 \vdots\\
-Qx_{N-1}^{\mathrm{ref}}\\
-Q_{\mathrm{end}}x_N^{\mathrm{ref}}\\
-Ru_0^{\mathrm{ref}}\\
+Qx_N^{ref}\\
+Q_{end}x_{N+1}^{ref}\\
+Ru_1^{ref}\\
 \vdots\\
-Ru_{N-1}^{\mathrm{ref}}
+Ru_N^{ref}
 \end{bmatrix}.
 $$
 
-The implementation therefore computes
-
-```python
-cqp = -np.concatenate(
-    (
-        (Q @ x_ref[:, :N]).reshape(-1, order="F"),
-        (Qend @ x_ref[:, N]).reshape(-1, order="F"),
-        (R @ u_ref).reshape(-1, order="F"),
-    )
-)
-```
-
-This is mathematically equivalent to
-
-```python
-cqp = -H @ w_ref
-```
-
-but avoids constructing and multiplying the full horizon-sized reference vector.
+This is the form used by the implementation.
 
 ---
 
-# 4. From dynamics to equality constraints
+# 7. Conversion of the dynamics to equality constraints
 
 The discrete dynamics are
-
-$$
-x_{k+1}=Ax_k+Bu_k.
-$$
-
-Rearranging,
 
 $$
 x_{k+1}-Ax_k-Bu_k=0.
 $$
 
-Because \(x_0\) is included in the decision vector, the first equality constraint is simply
+The first constraint fixes the current state:
 
 $$
-x_0=\hat{x}_0.
+x_1=x_0.
 $$
 
-The complete equality system is therefore
+The next constraints are
 
 $$
-A_{\mathrm{qp}}w=b_{\mathrm{qp}}.
+x_2-Ax_1-Bu_1=0,
 $$
 
-The state portion has the block structure
+$$
+x_3-Ax_2-Bu_2=0,
+$$
+
+and so on until
 
 $$
-C_x=
+x_{N+1}-Ax_N-Bu_N=0.
+$$
+
+These equations are stacked into
+
+$$
+\boxed{
+A_{QP}w=b_{QP}.
+}
+$$
+
+---
+
+## 7.1 State part of the equality matrix
+
+The state part is
+
+$$
+C_x =
 \begin{bmatrix}
 I & 0 & 0 & \cdots & 0\\
--A&I&0&\cdots&0\\
-0&-A&I&\cdots&0\\
-\vdots&&\ddots&\ddots&\vdots\\
-0&\cdots&0&-A&I
+-A & I & 0 & \cdots & 0\\
+0 & -A & I & \cdots & 0\\
+\vdots & \vdots & \ddots & \ddots & \vdots\\
+0 & 0 & \cdots & -A & I
 \end{bmatrix}.
 $$
 
-The input portion is
-
-$$
-C_u=
-\begin{bmatrix}
-0&0&0&\cdots&0\\
--B&0&0&\cdots&0\\
-0&-B&0&\cdots&0\\
-\vdots&&\ddots&\ddots&\vdots\\
-0&\cdots&0&-B
-\end{bmatrix}.
-$$
+There are \(N+1\) state block columns and \(N+1\) state block rows.
 
 Therefore
 
 $$
 \boxed{
-A_{\mathrm{qp}}=
+C_x
+\in
+\mathbb{R}^{(N+1)n_x \times (N+1)n_x}.
+}
+$$
+
+---
+
+## 7.2 Input part of the equality matrix
+
+The input matrix contains one \(-B\) block for each control:
+
+$$
+C_u =
+\begin{bmatrix}
+0 & 0 & 0 & \cdots & 0\\
+-B & 0 & 0 & \cdots & 0\\
+0 & -B & 0 & \cdots & 0\\
+\vdots & \vdots & \ddots & \ddots & \vdots\\
+0 & 0 & \cdots & -B & 0
+\end{bmatrix}.
+$$
+
+The first block row is zero because the initial-state equation
+
+$$
+x_1=x_0
+$$
+
+does not contain a control input.
+
+There are \(N+1\) block rows and \(N\) input block columns, so
+
+$$
+\boxed{
+C_u
+\in
+\mathbb{R}^{(N+1)n_x \times Nn_u}.
+}
+$$
+
+---
+
+## 7.3 Complete equality matrix
+
+The complete matrix is
+
+$$
+\boxed{
+A_{QP}
+=
 \begin{bmatrix}
 C_x & C_u
 \end{bmatrix}.
 }
 $$
 
-The right-hand side is
+Therefore
 
 $$
 \boxed{
-b_{\mathrm{qp}}=
+A_{QP}
+\in
+\mathbb{R}^{(N+1)n_x
+\times
+\left((N+1)n_x+Nn_u\right)}.
+}
+$$
+
+The equality right-hand side is
+
+$$
+b_{QP}
+=
 \begin{bmatrix}
-\hat{x}_0\\
+x_0\\
 0\\
 \vdots\\
 0
-\end{bmatrix}.
-}
+\end{bmatrix}
 $$
 
-The first \(n_x\) rows enforce the measured initial condition.
-
-Every subsequent block enforces one discrete-time dynamics equation.
-
----
-
-# 5. Why the equality matrix is sparse
-
-Even when \(A\) and \(B\) are dense, they only appear in a small number of block locations.
-
-For example,
-
-$$
-C_x=
-\begin{bmatrix}
-I & 0 & 0 & 0\\
--A&I&0&0\\
-0&-A&I&0\\
-0&0&-A&I
-\end{bmatrix}.
-$$
-
-The matrix is therefore **block-banded**, not dense.
-
-The implementation constructs this structure directly with SciPy sparse matrices:
-
-```python
-Cx = (
-    sparse.eye(
-        (N + 1) * nx,
-        format="csc",
-    )
-    - sparse.kron(
-        sparse.diags(
-            np.ones(N),
-            offsets=-1,
-            shape=(N + 1, N + 1),
-            format="csc",
-        ),
-        A,
-        format="csc",
-    )
-)
-```
-
-and
-
-```python
-Cu = sparse.vstack(
-    (
-        sparse.csc_matrix((nx, N * nu)),
-        sparse.kron(
-            sparse.eye(N, format="csc"),
-            -B,
-            format="csc",
-        ),
-    ),
-    format="csc",
-)
-```
-
-Finally,
-
-```python
-Aqp = sparse.hstack(
-    (Cx, Cu),
-    format="csc",
-)
-```
-
-constructs the complete sparse equality matrix.
-
----
-
-# 6. State and input bounds
-
-The individual box constraints are
-
-$$
-x_{\mathrm{lb}}\le x_k\le x_{\mathrm{ub}}
-$$
-
-and
-
-$$
-u_{\mathrm{lb}}\le u_k\le u_{\mathrm{ub}}.
-$$
-
-These are represented directly as QP variable bounds rather than by introducing additional inequality rows.
-
-Thus
+with dimension
 
 $$
 \boxed{
-w_{\mathrm{lb}}\le w\le w_{\mathrm{ub}}.
+b_{QP}
+\in
+\mathbb{R}^{(N+1)n_x}.
 }
 $$
 
-The state bounds are repeated for all \(N+1\) predicted states:
-
-$$
-w_{\mathrm{lb}}^x=
-\begin{bmatrix}
-x_{\mathrm{lb}}\\
-\vdots\\
-x_{\mathrm{lb}}
-\end{bmatrix},
-$$
-
-and the input bounds are repeated for all \(N\) predicted inputs:
-
-$$
-w_{\mathrm{lb}}^u=
-\begin{bmatrix}
-u_{\mathrm{lb}}\\
-\vdots\\
-u_{\mathrm{lb}}
-\end{bmatrix}.
-$$
-
-The complete lower bound is
-
-$$
-w_{\mathrm{lb}}=
-\begin{bmatrix}
-w_{\mathrm{lb}}^x\\
-w_{\mathrm{lb}}^u
-\end{bmatrix},
-$$
-
-with an analogous construction for \(w_{\mathrm{ub}}\).
-
-Because \(x_0\) is a decision variable, the state bounds also apply to \(x_0\). Consequently, the current measured state must lie within the specified state bounds for the QP to be feasible.
+The first \(n_x\) elements contain the current measured state \(x_0\). All remaining elements are zero.
 
 ---
 
-# 7. Complete QP
+# 8. Conversion of the state and input bounds
 
-The complete lifted MPC problem produced by `generate_QP()` is therefore
+The variable bounds are represented directly on the decision vector.
+
+For the states,
+
+$$
+x_{lb}\le x_k\le x_{ub},
+\qquad
+k=1,\ldots,N+1.
+$$
+
+For the inputs,
+
+$$
+u_{lb}\le u_k\le u_{ub},
+\qquad
+k=1,\ldots,N.
+$$
+
+Therefore the complete lower bound is
+
+$$
+w_{lb}
+=
+\begin{bmatrix}
+x_{lb}\\
+\vdots\\
+x_{lb}\\
+u_{lb}\\
+\vdots\\
+u_{lb}
+\end{bmatrix}
+$$
+
+and the complete upper bound is
+
+$$
+w_{ub}
+=
+\begin{bmatrix}
+x_{ub}\\
+\vdots\\
+x_{ub}\\
+u_{ub}\\
+\vdots\\
+u_{ub}
+\end{bmatrix}.
+$$
+
+Their dimensions are
+
+$$
+\boxed{
+w_{lb},w_{ub}
+\in
+\mathbb{R}^{n_w}.
+}
+$$
+
+Explicitly,
+
+$$
+w_{lb}
+=
+\begin{bmatrix}
+x_{lb} \\
+\vdots \\
+x_{lb} \\
+u_{lb} \\
+\vdots \\
+u_{lb}
+\end{bmatrix},
+\qquad
+w_{ub}
+=
+\begin{bmatrix}
+x_{ub} \\
+\vdots \\
+x_{ub} \\
+u_{ub} \\
+\vdots \\
+u_{ub}
+\end{bmatrix},
+$$
+
+where the state bounds are repeated \(N+1\) times and the input bounds are repeated \(N\) times.
+
+No additional constraint matrix is required for these simple box constraints.
+
+---
+
+# 9. Complete QP
+
+After stacking the states and inputs, the LMPC problem becomes the following structured QP:
 
 $$
 \boxed{
 \begin{aligned}
 \min_w\quad&
-\frac12w^THw+c^Tw\\
+\frac{1}{2}w^T H_{QP} w
++
+c_{QP}^T w
+\\
 \text{s.t.}\quad&
-A_{\mathrm{qp}}w=b_{\mathrm{qp}},\\
+A_{QP}w=b_{QP},
+\\
 &
-w_{\mathrm{lb}}\le w\le w_{\mathrm{ub}}.
+w_{lb}\le w\le w_{ub}.
 \end{aligned}
 }
 $$
 
+The QP components have the following dimensions:
+
+| QP component |               Dimension | Description                |
+| ------------ | ----------------------: | -------------------------- |
+| \(w\)        |        \(n_w \times 1\) | Decision vector            |
+| \(H_{QP}\)   |      \(n_w \times n_w\) | Quadratic cost matrix      |
+| \(c_{QP}\)   |        \(n_w \times 1\) | Linear cost vector         |
+| \(A_{QP}\)   | \((N+1)n_x \times n_w\) | Equality constraint matrix |
+| \(b_{QP}\)   |   \((N+1)n_x \times 1\) | Equality constraint vector |
+| \(w_{lb}\)   |        \(n_w \times 1\) | Lower bounds               |
+| \(w_{ub}\)   |        \(n_w \times 1\) | Upper bounds               |
+
 where
 
 $$
-H=
-\operatorname{blkdiag}
-\left(
-Q,\ldots,Q,Q_{\mathrm{end}},
-R,\ldots,R
-\right)
-$$
-
-and
-
-$$
-c=-Hw_{\mathrm{ref}}.
-$$
-
-In the implementation, the QP is returned as:
-
-```python
-{
-    "H": Hqp,
-    "c": cqp,
-    "A": Aqp,
-    "b": bqp,
-    "lb": w_lb,
-    "ub": w_ub,
+\boxed{
+n_w=(N+1)n_x+Nn_u.
 }
-```
-
-The name `"H"` is used by this implementation for the QP quadratic matrix. When passing it to `qpsolvers`, it corresponds to the library's `P` argument.
-
-Thus:
-
-```python
-solve_qp(
-    P=qp["H"],
-    q=qp["c"],
-    A=qp["A"],
-    b=qp["b"],
-    lb=qp["lb"],
-    ub=qp["ub"],
-    solver="osqp",
-)
-```
-
-matches the mathematical problem above.
-
-The standard `qpsolvers` formulation is
-
-$$
-\frac12x^TPx+q^Tx
 $$
 
-subject to equality constraints, inequality constraints, and variable bounds. The library accepts SciPy CSC matrices for sparse `P` and `A`. Solver-specific keyword arguments can also be passed through `solve_qp`.
+The matrix \(H_{QP}\) is block diagonal and \(A_{QP}\) is block banded. This structure is what allows the lifted LMPC problem to be represented efficiently as a sparse QP.
 
 ---
 
-# 8. Variable ordering and unpacking the solution
+# 10. Sparse matrix structure
 
-The optimizer returns one vector
-
-```text
-w = [x0, x1, ..., xN, u0, ..., u(N-1)]
-```
-
-where each state and input is a vector.
-
-The state portion occupies
-
-```python
-(n + 1) * nx
-```
-
-elements.
-
-The input portion occupies
-
-```python
-n * nu
-```
-
-elements.
-
-For a solution `w`, the trajectories can be recovered as:
-
-```python
-x = w[:(N + 1) * nx]
-u = w[(N + 1) * nx:]
-
-x = x.reshape((N + 1, nx))
-u = u.reshape((N, nu))
-```
-
-After reshaping,
-
-```text
-x[k, :]
-```
-
-is \(x_k^T\), and
-
-```text
-u[k, :]
-```
-
-is \(u_k^T\).
-
----
-
-# 9. Data interface
-
-All numerical inputs are NumPy arrays with `float64` precision.
-
-The required dimensions are:
-
-| Parameter | Shape       |
-| --------- | ----------- |
-| `A`       | `(nx, nx)`  |
-| `B`       | `(nx, nu)`  |
-| `Q`       | `(nx, nx)`  |
-| `R`       | `(nu, nu)`  |
-| `Qend`    | `(nx, nx)`  |
-| `x0`      | `(nx, 1)`   |
-| `x_ref`   | `(nx, N+1)` |
-| `u_ref`   | `(nu, N)`   |
-| `x_lb`    | `(nx, 1)`   |
-| `x_ub`    | `(nx, 1)`   |
-| `u_lb`    | `(nu, 1)`   |
-| `u_ub`    | `(nu, 1)`   |
-
-where
-
-```text
-N  = intervals
-nx = number of states
-nu = number of inputs
-```
-
----
-
-# 10. Reference trajectory layout
-
-The state reference is stored as
-
-```python
-x_ref.shape == (nx, N + 1)
-```
-
-where
-
-```text
-x_ref[:, 0] -> x0 reference
-x_ref[:, 1] -> x1 reference
-...
-x_ref[:, N] -> xN reference
-```
-
-The input reference is stored as
-
-```python
-u_ref.shape == (nu, N)
-```
-
-where
-
-```text
-u_ref[:, 0] -> u0 reference
-...
-u_ref[:, N-1] -> u(N-1) reference
-```
-
-The state reference includes a reference for \(x_0\), even though \(x_0\) itself is fixed by the initial-state equality constraint.
-
----
-
-# 11. Matrix sparsity
-
-The implementation preserves sparsity at the horizon level.
+The large QP matrices are constructed as sparse matrices.
 
 The Hessian has the structure
 
 $$
-H=
+H_{QP}
+=
+\operatorname{blkdiag}
+\left(
+Q,\ldots,Q,Q_{end},R,\ldots,R
+\right).
+$$
+
+Only the diagonal blocks are nonzero.
+
+The equality matrix has the block-banded structure
+
+$$
+A_{QP}
+=
 \begin{bmatrix}
-Q&0&0&\cdots&0\\
-0&Q&0&\cdots&0\\
-0&0&Q&\cdots&0\\
-\vdots&&&\ddots&\vdots\\
-0&0&0&\cdots&Q_{\mathrm{end}}\\
-&&&&\\
-&&&&R
+I & 0 & \cdots & 0 & 0 & \cdots & 0\\
+-A & I & \cdots & 0 & -B & \cdots & 0\\
+0 & -A & \ddots & \vdots & 0 & \ddots & 0\\
+\vdots & \vdots & \ddots & I & 0 & \cdots & -B
 \end{bmatrix}.
 $$
 
-The dynamics matrix is block-banded.
+Even when \(A\) and \(B\) are dense matrices, the complete lifted matrix remains sparse because the dense blocks occupy only specific locations.
 
-Consequently, the memory required by the lifted formulation grows with the number of horizon blocks rather than storing the full dense horizon matrices.
-
-For dense `A` and `B`, the nonzero blocks themselves are dense, but the overall matrices remain sparse because the zero blocks between them are never explicitly constructed.
-
-The implementation therefore converts the small matrices to sparse form only when embedding them into the large horizon matrices:
-
-```python
-A = sparse.csc_matrix(self.A)
-B = sparse.csc_matrix(self.B)
-Q = sparse.csc_matrix(self.Q)
-R = sparse.csc_matrix(self.R)
-Qend = sparse.csc_matrix(self.Qend)
-```
-
-The large matrices are then constructed directly as CSC matrices.
+The large matrices are therefore represented as SciPy CSC matrices, while the vectors remain dense NumPy arrays.
 
 ---
 
-# 12. Why CSC?
+# 11. Checks implemented by `LinearMPC`
 
-The lifted matrices are constructed in SciPy's **Compressed Sparse Column (CSC)** format:
+The class validates the LMPC data before constructing the QP.
 
-```python
-format="csc"
-```
+## Matrix dimensions
 
-This is a standard sparse representation and is directly accepted by qpsolvers for sparse QP matrices.
+The dimensions of all inputs are checked against `N`, `nx`, and `nu`.
 
-The objective and constraint vectors remain ordinary NumPy arrays because they do not contain the same large block-level sparsity structure.
-
-The resulting representation is therefore:
-
-```text
-P / H      -> scipy.sparse.csc_matrix
-A          -> scipy.sparse.csc_matrix
-
-q / c      -> numpy.ndarray
-b          -> numpy.ndarray
-lb         -> numpy.ndarray
-ub         -> numpy.ndarray
-```
-
----
-
-# 13. Validation
-
-The `LinearMPC` model validates the input dimensions before constructing the QP.
-
-It also verifies:
-
-### `Q` and `Qend`
+In particular:
 
 $$
-Q=Q^T,
-\qquad
-Q\succeq0
+A\in\mathbb{R}^{n_x\times n_x}
+$$
+
+$$
+B\in\mathbb{R}^{n_x\times n_u}
+$$
+
+$$
+Q,Q_{end}\in\mathbb{R}^{n_x\times n_x}
+$$
+
+$$
+R\in\mathbb{R}^{n_u\times n_u}
+$$
+
+$$
+x_0,x_{lb},x_{ub}\in\mathbb{R}^{n_x\times1}
+$$
+
+$$
+u_{lb},u_{ub}\in\mathbb{R}^{n_u\times1}
+$$
+
+$$
+x_{ref}\in\mathbb{R}^{n_x\times(N+1)}
+$$
+
+$$
+u_{ref}\in\mathbb{R}^{n_u\times N}.
+$$
+
+An error is raised if any matrix or vector has an unexpected shape.
+
+## Symmetry of the weighting matrices
+
+The class checks that
+
+$$
+Q=Q^T
+$$
+
+$$
+Q_{end}=Q_{end}^T
 $$
 
 and
 
 $$
-Q_{\mathrm{end}}=Q_{\mathrm{end}}^T,
-\qquad
-Q_{\mathrm{end}}\succeq0.
+R=R^T.
 $$
 
-### `R`
+## Positive semidefiniteness of \(Q\) and \(Q_{end}\)
+
+The class checks that the minimum eigenvalue satisfies
 
 $$
-R=R^T,
-\qquad
-R\succ0.
-$$
-
-### Bounds
-
-Every component must satisfy
-
-$$
-x_{\mathrm{lb}}\le x_{\mathrm{ub}}
+\lambda_{\min}(Q)\geq -10^{-10}
 $$
 
 and
 
 $$
-u_{\mathrm{lb}}\le u_{\mathrm{ub}}.
+\lambda_{\min}(Q_{end})\geq -10^{-10}.
 $$
 
-These conditions ensure that the supplied weighting matrices define a convex quadratic tracking objective and that the box constraints are internally consistent.
+This ensures that the state and terminal cost contributions are convex up to the numerical tolerance used by the validation.
 
-Note that whether a particular QP backend accepts a positive-semidefinite rather than positive-definite quadratic matrix depends on the selected solver. qpsolvers documents that some backends require definiteness while others support semidefinite problems.
+## Positive definiteness of \(R\)
 
----
-
-# 14. Example
-
-```python
-import numpy as np
-
-N = 1000
-nx = 12
-nu = 4
-
-A = np.array([
-    [1.,      0.,     0., 0., 0., 0., 0.1,     0.,     0.,  0.,     0.,     0.    ],
-    [0.,      1.,     0., 0., 0., 0., 0.,      0.1,    0.,  0.,     0.,     0.    ],
-    [0.,      0.,     1., 0., 0., 0., 0.,      0.,     0.1, 0.,     0.,     0.    ],
-    [0.0488,  0.,     0., 1., 0., 0., 0.0016,  0.,     0.,  0.0992, 0.,     0.    ],
-    [0.,     -0.0488, 0., 0., 1., 0., 0.,     -0.0016, 0.,  0.,     0.0992, 0.    ],
-    [0.,      0.,     0., 0., 0., 1., 0.,      0.,     0.,  0.,     0.,     0.0992],
-    [0.,      0.,     0., 0., 0., 0., 1.,      0.,     0.,  0.,     0.,     0.    ],
-    [0.,      0.,     0., 0., 0., 0., 0.,      1.,     0.,  0.,     0.,     0.    ],
-    [0.,      0.,     0., 0., 0., 0., 0.,      0.,     1.,  0.,     0.,     0.    ],
-    [0.9734,  0.,     0., 0., 0., 0., 0.0488,  0.,     0.,  0.9846, 0.,     0.    ],
-    [0.,     -0.9734, 0., 0., 0., 0., 0.,     -0.0488, 0.,  0.,     0.9846, 0.    ],
-    [0.,      0.,     0., 0., 0., 0., 0.,      0.,     0.,  0.,     0.,     0.9846],
-], dtype=np.float64)
-
-B = np.array([
-    [0.,      -0.0726,  0.,     0.0726],
-    [-0.0726,  0.,       0.0726, 0.    ],
-    [-0.0152,  0.0152, -0.0152, 0.0152],
-    [0.,     -0.0006,   0.,     0.0006],
-    [0.0006,   0.,      -0.0006, 0.    ],
-    [0.0106,   0.0106,   0.0106, 0.0106],
-    [0.,     -1.4512,   0.,     1.4512],
-    [-1.4512,  0.,       1.4512, 0.    ],
-    [-0.3049,  0.3049, -0.3049, 0.3049],
-    [0.,     -0.0236,   0.,     0.0236],
-    [0.0236,   0.,      -0.0236, 0.    ],
-    [0.2107,   0.2107,   0.2107, 0.2107],
-], dtype=np.float64)
-
-Q = np.diag([
-    0., 0., 10., 10., 10., 10.,
-    0., 0., 0., 5., 5., 5.
-])
-
-R = 0.1 * np.eye(nu)
-Qend = Q.copy()
-
-x0 = np.zeros((nx, 1))
-
-x_ref = np.zeros((nx, N + 1))
-x_ref[2, :] = 1.0
-
-u_ref = np.zeros((nu, N))
-
-x_lb = np.array([
-    [-np.pi / 6],
-    [-np.pi / 6],
-    [-100.],
-    [-100.],
-    [-100.],
-    [-1.],
-    [-100.],
-    [-100.],
-    [-100.],
-    [-100.],
-    [-100.],
-    [-100.],
-])
-
-x_ub = np.array([
-    [np.pi / 6],
-    [np.pi / 6],
-    [100.],
-    [100.],
-    [100.],
-    [100.],
-    [100.],
-    [100.],
-    [100.],
-    [100.],
-    [100.],
-    [100.],
-])
-
-u0 = 10.5916
-
-u_lb = np.full(
-    (nu, 1),
-    9.6 - u0,
-)
-
-u_ub = np.full(
-    (nu, 1),
-    13.0 - u0,
-)
-
-mpc = LinearMPC(
-    intervals=N,
-    nx=nx,
-    nu=nu,
-    A=A,
-    B=B,
-    Q=Q,
-    R=R,
-    Qend=Qend,
-    x0=x0,
-    x_ref=x_ref,
-    u_ref=u_ref,
-    x_lb=x_lb,
-    x_ub=x_ub,
-    u_lb=u_lb,
-    u_ub=u_ub,
-)
-
-qp = mpc.generate_QP()
-```
-
----
-
-# 15. Solving the generated QP
-
-The generated QP can be passed directly to qpsolvers.
-
-For example:
-
-```python
-from qpsolvers import solve_qp
-
-w = solve_qp(
-    P=qp["H"],
-    q=qp["c"],
-    A=qp["A"],
-    b=qp["b"],
-    lb=qp["lb"],
-    ub=qp["ub"],
-    solver="osqp",
-)
-```
-
-The solver is selected through the `solver` argument.
-
-Backend-specific solver parameters can be supplied as additional keyword arguments. For example:
-
-```python
-w = solve_qp(
-    P=qp["H"],
-    q=qp["c"],
-    A=qp["A"],
-    b=qp["b"],
-    lb=qp["lb"],
-    ub=qp["ub"],
-    solver="osqp",
-    eps_abs=1e-6,
-    eps_rel=1e-6,
-    max_iter=10000,
-    verbose=True,
-)
-```
-
-The exact available parameters depend on the selected backend. qpsolvers forwards additional keyword arguments to the underlying solver.
-
----
-
-# 16. Computational structure
-
-The implementation deliberately avoids constructing dense horizon matrices.
-
-The construction flow is:
-
-```text
-                 MPC parameters
-                       │
-                       ▼
-              Pydantic validation
-                       │
-                       ▼
-             Lifted MPC formulation
-                       │
-          ┌────────────┴────────────┐
-          ▼                         ▼
-    Block-diagonal H          Block-banded A
-          │                         │
-          └────────────┬────────────┘
-                       ▼
-                Sparse QP matrices
-                       │
-                       ▼
-                qpsolvers backend
-                       │
-                       ▼
-                  optimal w
-```
-
-The important property is that `A` and `B` do **not** need to be sparse themselves.
-
-For dense `A` and `B`, only the individual \(A\) and \(B\) blocks are dense. The large lifted matrix remains sparse because the remaining block locations are zero.
-
----
-
-# 17. Why the lifted formulation?
-
-An alternative is to eliminate all state variables and formulate the problem only in terms of the inputs.
-
-That produces a condensed QP, but the condensed Hessian and constraint matrices are generally much denser.
-
-The lifted formulation retains the state variables and preserves the block structure:
+The input weighting matrix is required to be positive definite:
 
 $$
-\begin{bmatrix}
-I\\
--A&I\\
-&-A&I\\
-&&\ddots
-\end{bmatrix}.
+\lambda_{\min}(R)>10^{-10}.
 $$
 
-For long horizons, this structure is particularly valuable because the QP retains sparse matrices even when the original system matrices are dense.
+This ensures that the input cost is strictly convex in the control variables.
 
-Th
+## Bounds
+
+The class checks that every lower bound is less than or equal to its corresponding upper bound:
+
+$$
+x_{lb}\leq x_{ub}
+$$
+
+and
+
+$$
+u_{lb}\leq u_{ub}.
+$$
+
+The QP is constructed only after all of these checks have passed.
