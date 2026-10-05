@@ -1,4 +1,4 @@
-# Sparse Linear MPC QP Generator
+# Sparse Linear MPC
 
 A Python implementation for formulating and generating sparse Quadratic Programming (QP) matrices for discrete-time Linear Model Predictive Control (LMPC). Built with `pydantic` for strict validation and `scipy.sparse` for scalable, memory-efficient matrix assembly.
 
