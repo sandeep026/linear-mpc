@@ -12,8 +12,8 @@ Given a prediction horizon $N$, state dimension $n_x$, and input dimension $n_u$
 
 $$ 
 \begin{aligned}
-\min_{x, u} \quad & \sum_{k=1}^{N} \left( (x_k - x_{\text{ref},k})^T Q (x_k - x_{\text{ref},k}) + (u_k - u_{\text{ref},k})^T R (u_k - u_{\text{ref},k}) \right) \\
-& + (x_{N+1} - x_{\text{ref},N+1})^T Q_{\text{end}} (x_{N+1} - x_{\text{ref},N+1}) \\
+\min_{x, u} \quad & \sum_{k=1}^{N} \frac{1}{2} \left( (x_k - x_{\text{ref},k})^T Q (x_k - x_{\text{ref},k}) + (u_k - u_{\text{ref},k})^T R (u_k - u_{\text{ref},k}) \right) \\
+& + \frac{1}{2}(x_{N+1} - x_{\text{ref},N+1})^T Q_{\text{end}} (x_{N+1} - x_{\text{ref},N+1}) \\
 \text{s.t.} \quad & x_1 = \bar{x}_0 \\
 & x_{k+1} = A x_k + B u_k, \quad \forall k \in \{1, \dots, N\} \\
 & x_{lb} \le x_k \le x_{ub}, \quad \forall k \in \{1, \dots, N+1\} \\
