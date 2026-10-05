@@ -225,6 +225,8 @@ $$
 ### Example
 
 ```python
+from lmpc import LinearMPC
+from qpsolver import solve_qp
 import matplotlib.pyplot as plt
 
 #mpc parameters
@@ -305,3 +307,6 @@ a[1].set_title("Control Input")
 a[1].set_xlabel("Time (s)")
 a[1].grid(True)
 ```
+<p align="center">
+  <img src="lmpc.png" alt="Alt text">
+</p>
