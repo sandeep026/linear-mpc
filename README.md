@@ -222,6 +222,14 @@ w_{\mathrm{ub}} =
 \end{bmatrix}
 $$
 
+### Requirements
+
+1. numpy
+2. scipy
+3. qpsolver/any sparse QP solver
+4. pydantic
+5. matplotlib
+
 ### Example
 
 ```python
@@ -313,7 +321,8 @@ a[1].grid(True)
 
 ### QP matrices construction benchmark
 
-For a 12 state, 4 control quadcopter system, QP matrices can be generated within 0.5 seconds for upto a million intervals.
+For a 12 state, 4 control quadcopter system, QP matrices can be generated within 0.5 seconds for upto a million intervals. For more details refer to
+[benchmark.py](./benchmark.py)
 
 <p align="center">
   <img src="bench.png" alt="Alt text">
