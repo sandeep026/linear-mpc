@@ -1,8 +1,5 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from lmpc import LinearMPC
-
-#quadcopter from OSQP website
 
 Ad = np.array([
     [1,       0,      0, 0, 0, 0, 0.1,     0,      0,  0,      0,      0],
@@ -141,9 +138,9 @@ for i in intervals:
     t2 = perf_counter()
     timer.append((t2 - t1) / rounds)
 
-import matplotlib.pyplot as plt
 
 N = list(intervals)
+plt.figure(figsize=(10,3))
 plt.plot(np.hstack(N), np.hstack(timer) * 1e3)
 plt.ylabel('Averaged construction time [ms]')
 plt.xlabel('Intervals')
