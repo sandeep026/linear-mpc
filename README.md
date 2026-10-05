@@ -5,6 +5,7 @@ A Python implementation for formulating and generating sparse Quadratic Programm
 ## Discrete LMPC Formulation
 
 Consider a discrete-time linear time-invariant system:
+
 $$ x_{k+1} = A x_k + B u_k $$
 
 Given a prediction horizon $N$, state dimension $n_x$, and input dimension $n_u$, the LMPC solves the following optimal control problem at each time step:
