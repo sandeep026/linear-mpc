@@ -1,767 +1,481 @@
-# Linear MPC
+Linear MPC
 
-A lightweight implementation of **discrete-time linear model predictive control (LMPC)** that formulates the MPC optimization problem as a structured sparse quadratic program.
+This project defines a finite-horizon linear model predictive control
+(MPC) problem and converts it into a structured quadratic program (QP).
 
-The implementation uses:
+The implementation uses a discrete-time linear model
 
-* NumPy for numerical model and MPC data
-* SciPy sparse matrices for the lifted QP
-* Pydantic for input validation
+$$
+x_{k+1} = A x_k + B u_k
+$$
 
----
+where:
 
-# 1. Linear MPC problem
+$x_k \in \mathbb{R}^{n_x}$ is the state,
 
-Consider a continuous-time linear system
+$u_k \in \mathbb{R}^{n_u}$ is the control input,
+
+$A \in \mathbb{R}^{n_x \times n_x}$ is the state-transition matrix,
+
+$B \in \mathbb{R}^{n_x \times n_u}$ is the input matrix.
+
+The horizon contains $n$ control moves. States are indexed from $1$ to
+$n+1$, while controls are indexed from $1$ to $n$:
+
+$$
+x_1, x_2, \ldots, x_{n+1}
+$$
+
+$$
+u_1, u_2, \ldots, u_n
+$$
+
+The first state is the current state $x_1 = x_0$. The remaining states
+are predicted using the discrete model.
+
+Discrete-Time Model and ZOH
+
+The matrices $A$ and $B$ represent the discrete-time prediction model.
+For a continuous-time linear system
 
 $$
 \dot{x}(t) = A_c x(t) + B_c u(t)
 $$
 
-with state
-
-$$
-x(t) \in \mathbb{R}^{n_x}
-$$
-
-and input
-
-$$
-u(t) \in \mathbb{R}^{n_u}.
-$$
-
-The controller uses a discrete-time model obtained from the continuous-time system. With a sampling time \(T_s\), the input is assumed to be held constant over each sampling interval using **zero-order hold (ZOH)**:
-
-$$
-u(t) = u_k
-$$
-
-for
-
-$$
-t \in [kT_s,(k+1)T_s).
-$$
-
-The resulting discrete-time model is
+the discrete model can be obtained by assuming zero-order hold (ZOH) on
+the control input over each sampling interval. The resulting model is
 
 $$
 x_{k+1} = A x_k + B u_k.
 $$
 
-Here,
+Under ZOH, $u_k$ is held constant during the sampling interval
+associated with the transition from $x_k$ to $x_{k+1}$.
 
-* \(A \in \mathbb{R}^{n_x \times n_x}\)
-* \(B \in \mathbb{R}^{n_x \times n_u}\)
+This class operates on the discrete matrices $A$ and $B$; discretization
+itself is outside the class.
 
-and \(x_k\) and \(u_k\) denote the state and input at sampling instant \(k\).
+LMPC Problem
 
----
+The finite-horizon linear MPC problem uses the following dimensions.
 
-# 2. Prediction horizon and indexing
+Component                      Symbol            Dimension
 
-Let the prediction horizon contain \(N\) control intervals.
+Horizon length                    $n$               scalar
+State dimension                 $n_x$               scalar
+Control dimension               $n_u$               scalar
+State transition matrix           $A$     $n_x \times n_x$
+Input matrix                      $B$     $n_x \times n_u$
+State cost matrix                 $Q$     $n_x \times n_x$
+Input cost matrix                 $R$     $n_u \times n_u$
+Terminal cost matrix        $Q_{end}$     $n_x \times n_x$
+Initial state                   $x_0$       $n_x \times 1$
+State reference             $x_{ref}$   $n_x \times (n+1)$
+Input reference             $u_{ref}$       $n_u \times n$
+State lower bound            $x_{lb}$       $n_x \times 1$
+State upper bound            $x_{ub}$       $n_x \times 1$
+Input lower bound            $u_{lb}$       $n_u \times 1$
+Input upper bound            $u_{ub}$       $n_u \times 1$
 
-The predicted states are indexed as
-
-$$
-x_1,x_2,\ldots,x_{N+1}.
-$$
-
-The predicted control inputs are indexed as
-
-$$
-u_1,u_2,\ldots,u_N.
-$$
-
-The first predicted state is the current measured state:
-
-$$
-x_1 = x_0.
-$$
-
-The dynamics are therefore
+The optimization variables are
 
 $$
-x_{k+1}=Ax_k+Bu_k,
-\qquad
-k=1,\ldots,N.
+x_1,\ldots,x_{n+1},u_1,\ldots,u_n.
 $$
 
-Thus the final predicted state is \(x_{N+1}\).
-
-This indexing gives the following interpretation:
-
-| Quantity      |            Dimension | Meaning                                                  |
-| ------------- | -------------------: | -------------------------------------------------------- |
-| \(x_k\)       |     \(n_x \times 1\) | State at prediction step \(k\), \(k=1,\ldots,N+1\)       |
-| \(u_k\)       |     \(n_u \times 1\) | Control input at prediction step \(k\), \(k=1,\ldots,N\) |
-| \(x_0\)       |     \(n_x \times 1\) | Measured/current state                                   |
-| \(x_k^{ref}\) |     \(n_x \times 1\) | State reference at step \(k\)                            |
-| \(u_k^{ref}\) |     \(n_u \times 1\) | Input reference at step \(k\)                            |
-| \(A\)         |   \(n_x \times n_x\) | Discrete-time state matrix                               |
-| \(B\)         |   \(n_x \times n_u\) | Discrete-time input matrix                               |
-| \(Q\)         |   \(n_x \times n_x\) | Stage-state weighting matrix                             |
-| \(Q_{end}\)   |   \(n_x \times n_x\) | Terminal-state weighting matrix                          |
-| \(R\)         |   \(n_u \times n_u\) | Input weighting matrix                                   |
-| \(x_{lb}\)    |     \(n_x \times 1\) | State lower bound                                        |
-| \(x_{ub}\)    |     \(n_x \times 1\) | State upper bound                                        |
-| \(u_{lb}\)    |     \(n_u \times 1\) | Input lower bound                                        |
-| \(u_{ub}\)    |     \(n_u \times 1\) | Input upper bound                                        |
-| \(x_{ref}\)   | \(n_x \times (N+1)\) | Complete state reference trajectory                      |
-| \(u_{ref}\)   |     \(n_u \times N\) | Complete input reference trajectory                      |
-
-The state reference contains
+The objective is
 
 $$
-x_{ref}
-=
-[x_1^{ref},\ldots,x_{N+1}^{ref}]
+\min
+\sum_{k=1}^{n}
+\lVert x_k-x_{ref,k}\rVert_Q^2
++
+\lVert x_{n+1}-x_{ref,n+1}\rVert_{Q_{end}}^2
++
+\sum_{k=1}^{n}
+\lVert u_k-u_{ref,k}\rVert_R^2
 $$
 
-and the input reference contains
+where the weighted norm is
 
 $$
-u_{ref}
-=
-[u_1^{ref},\ldots,u_N^{ref}].
+\lVert z\rVert_Q^2 = z^T Q z.
 $$
 
----
-
-# 3. Weighted norms
-
-For a vector \(v\) and positive semidefinite matrix \(W\), define the weighted squared norm as
+The dynamics constraints are
 
 $$
-\|v\|_W^2 = v^T W v.
-$$
-
-Using this notation makes the MPC objective compact and makes the role of each weighting matrix clear.
-
----
-
-# 4. Discrete linear MPC problem
-
-The LMPC problem is
-
-$$
-\begin{aligned}
-\min_{\{x_k,u_k\}}
-\quad&
-\frac{1}{2}
-\sum_{k=1}^{N}
-\|x_k-x_k^{ref}\|_Q^2
-\\
-&+
-\frac{1}{2}
-\|x_{N+1}-x_{N+1}^{ref}\|_{Q_{end}}^2
-\\
-&+
-\frac{1}{2}
-\sum_{k=1}^{N}
-\|u_k-u_k^{ref}\|_R^2
-\end{aligned}
-$$
-
-subject to
-
-$$
-x_1=x_0
+x_1 = x_0
 $$
 
 and
 
 $$
-x_{k+1}=Ax_k+Bu_k,
-\qquad
-k=1,\ldots,N.
+x_{k+1}=A x_k+B u_k,
+\qquad k=1,\ldots,n.
 $$
 
-The state and input constraints are
+The state and input bounds are
 
 $$
-x_{lb}\le x_k\le x_{ub},
-\qquad
-k=1,\ldots,N+1
+x_{lb}\leq x_k\leq x_{ub},
+\qquad k=1,\ldots,n+1
 $$
 
 and
 
 $$
-u_{lb}\le u_k\le u_{ub},
-\qquad
-k=1,\ldots,N.
+u_{lb}\leq u_k\leq u_{ub},
+\qquad k=1,\ldots,n.
 $$
 
-The first state \(x_1\) is therefore fixed to the current measured state \(x_0\), while \(x_2,\ldots,x_{N+1}\) are predicted states.
+The matrices $Q$ and $Q_{end}$ are positive semidefinite, while $R$ is
+positive definite.
 
----
+Conversion to a QP
 
-# 5. Decision vector
+The LMPC problem is converted into a quadratic program by stacking every
+predicted state and control input into one decision vector.
 
-All predicted states and control inputs are stacked into one decision vector:
+The stacked vector is
 
 $$
 w =
 \begin{bmatrix}
-x_1\\
-x_2\\
-\vdots\\
-x_N\\
-x_{N+1}\\
-u_1\\
-u_2\\
-\vdots\\
-u_N
+x_1\
+x_2\
+\vdots\
+x_{n+1}\
+u_1\
+u_2\
+\vdots\
+u_n
 \end{bmatrix}.
-$$
-
-The dimensions are
-
-$$
-w \in \mathbb{R}^{n_w}
-$$
-
-with
-
-$$
-\boxed{
-n_w=(N+1)n_x+Nn_u.
-}
-$$
-
-The corresponding reference vector is
-
-$$
-w_{ref} =
-\begin{bmatrix}
-x_1^{ref}\\
-x_2^{ref}\\
-\vdots\\
-x_N^{ref}\\
-x_{N+1}^{ref}\\
-u_1^{ref}\\
-u_2^{ref}\\
-\vdots\\
-u_N^{ref}
-\end{bmatrix}.
-$$
-
----
-
-# 6. Conversion of the cost to a QP
-
-The first step is to collect all weighting matrices into one block-diagonal matrix:
-
-$$
-H_{QP}
-=
-\operatorname{blkdiag}
-\left(
-\underbrace{Q,\ldots,Q}_{N},
-Q_{end},
-\underbrace{R,\ldots,R}_{N}
-\right).
 $$
 
 Its dimension is
 
 $$
-\boxed{
-H_{QP}
-\in
-\mathbb{R}^{n_w\times n_w}.
-}
+w\in\mathbb{R}^{(n+1)n_x+n n_u}.
 $$
 
-Using the decision vector and reference vector, the complete tracking cost can be written as
+The conversion has three main parts:
 
-$$
-J
-=
-\frac{1}{2}
-(w-w_{ref})^T
-H_{QP}
-(w-w_{ref}).
-$$
+construct the quadratic cost matrix and linear cost vector;
 
-Expanding the quadratic gives
+construct the linear equality constraint matrix and right-hand side;
 
-$$
-J
-=
-\frac{1}{2}w^T H_{QP} w
--
-w_{ref}^T H_{QP}w
-+
-\frac{1}{2}
-w_{ref}^T H_{QP}w_{ref}.
+construct the lower and upper bounds on the stacked decision vector.
+
+A constant term in the expanded objective is ignored because it does not
+depend on $w$ and therefore does not change the optimizer.
+
+Cost Construction
+
+For one state stage,
+
+x_k^TQx_k
+-2x_{ref,k}^TQx_k
++x_{ref,k}^TQx_{ref,k}.
 $$
 
-The final term does not depend on the optimization variable \(w\). It is therefore a constant and can be ignored when solving the optimization problem.
+Similarly, the terminal term is
 
-The objective can consequently be written as
-
-$$
-\boxed{
-J
-=
-\frac{1}{2}w^T H_{QP}w
-+
-c_{QP}^T w
-}
+x_{n+1}^TQ_{end}x_{n+1}
+-2x_{ref,n+1}^TQ_{end}x_{n+1}
++\text{constant}
 $$
 
-where
+and the input terms are
 
-$$
-\boxed{
-c_{QP}=-H_{QP}w_{ref}.
-}
+u_k^TRu_k
+-2u_{ref,k}^TRu_k
++\text{constant}.
 $$
 
-Because \(H_{QP}\) is block diagonal, the linear term can also be constructed block by block:
+After stacking the variables, the quadratic part is represented by
 
+\operatorname{blkdiag}
+\left(
+Q,\ldots,Q,Q_{end},
+R,\ldots,R
+\right).
 $$
-c_{QP}
-=
--
+
+There are $n$ copies of $Q$, one copy of $Q_{end}$, and $n$ copies of
+$R$.
+
+The linear part is
+
+-2
 \begin{bmatrix}
-Qx_1^{ref}\\
-\vdots\\
-Qx_N^{ref}\\
-Q_{end}x_{N+1}^{ref}\\
-Ru_1^{ref}\\
-\vdots\\
-Ru_N^{ref}
+Qx_{ref,1}\
+Qx_{ref,2}\
+\vdots\
+Qx_{ref,n}\
+Q_{end}x_{ref,n+1}\
+Rx_{ref,u,1}\
+\vdots\
+Rx_{ref,u,n}
+\end{bmatrix}
+$$
+
+where $x_{ref,u,k}$ denotes the $k$-th input reference column.
+
+Equivalently, using the same array structure as the implementation,
+
+-2
+\begin{bmatrix}
+\operatorname{vec}(Qx_{ref,1})\
+Q_{end}x_{ref,n+1}\
+\operatorname{vec}(Ru_{ref})
 \end{bmatrix}.
 $$
 
-This is the form used by the implementation.
-
----
-
-# 7. Conversion of the dynamics to equality constraints
-
-The discrete dynamics are
+The objective represented by $H_{QP}$ and $c_{QP}$ is
 
 $$
-x_{k+1}-Ax_k-Bu_k=0.
+w^T H_{QP} w + c_{QP}^T w
 $$
 
-The first constraint fixes the current state:
+up to the constant reference-only terms that were discarded.
+
+Linear Equality Construction
+
+The dynamics are written so that every state equation contributes one
+block row.
+
+The first block row represents the initial condition:
 
 $$
 x_1=x_0.
 $$
 
-The next constraints are
+For $k=1,\ldots,n$, the following block row represents
 
 $$
-x_2-Ax_1-Bu_1=0,
+x_{k+1}-Ax_k-Bu_k=0.
 $$
 
-$$
-x_3-Ax_2-Bu_2=0,
-$$
-
-and so on until
+The complete equality constraint is therefore
 
 $$
-x_{N+1}-Ax_N-Bu_N=0.
-$$
-
-These equations are stacked into
-
-$$
-\boxed{
 A_{QP}w=b_{QP}.
-}
 $$
 
----
-
-## 7.1 State part of the equality matrix
-
-The state part is
+The state portion has the structured form
 
 $$
 C_x =
 \begin{bmatrix}
-I & 0 & 0 & \cdots & 0\\
--A & I & 0 & \cdots & 0\\
-0 & -A & I & \cdots & 0\\
-\vdots & \vdots & \ddots & \ddots & \vdots\\
-0 & 0 & \cdots & -A & I
+I & 0 & 0 & \cdots & 0\
+-A & I & 0 & \cdots & 0\
+0 & -A & I & \cdots & 0\
+\vdots & & \ddots & \ddots & \vdots\
+0 & \cdots & 0 & -A & I
 \end{bmatrix}.
 $$
 
-There are \(N+1\) state block columns and \(N+1\) state block rows.
+There are $n+1$ state block columns and $n+1$ state block rows. Each
+block is $n_x\times n_x$.
 
-Therefore
-
-$$
-\boxed{
-C_x
-\in
-\mathbb{R}^{(N+1)n_x \times (N+1)n_x}.
-}
-$$
-
----
-
-## 7.2 Input part of the equality matrix
-
-The input matrix contains one \(-B\) block for each control:
+The input portion is
 
 $$
 C_u =
 \begin{bmatrix}
-0 & 0 & 0 & \cdots & 0\\
--B & 0 & 0 & \cdots & 0\\
-0 & -B & 0 & \cdots & 0\\
-\vdots & \vdots & \ddots & \ddots & \vdots\\
-0 & 0 & \cdots & -B & 0
+0 & 0 & \cdots & 0\
+-B & 0 & \cdots & 0\
+0 & -B & \cdots & 0\
+\vdots & & \ddots & \vdots\
+0 & \cdots & -B
 \end{bmatrix}.
 $$
 
-The first block row is zero because the initial-state equation
+The first block row is zero because $x_1=x_0$ does not depend on a
+control input. The remaining $n$ block rows contain $-B$ in the column
+corresponding to the associated control input.
+
+The complete equality matrix is
 
 $$
-x_1=x_0
-$$
-
-does not contain a control input.
-
-There are \(N+1\) block rows and \(N\) input block columns, so
-
-$$
-\boxed{
-C_u
-\in
-\mathbb{R}^{(N+1)n_x \times Nn_u}.
-}
-$$
-
----
-
-## 7.3 Complete equality matrix
-
-The complete matrix is
-
-$$
-\boxed{
-A_{QP}
-=
+A_{QP} =
 \begin{bmatrix}
 C_x & C_u
 \end{bmatrix}.
-}
 $$
 
-Therefore
+The right-hand side contains the initial state followed by zeros:
 
-$$
-\boxed{
-A_{QP}
-\in
-\mathbb{R}^{(N+1)n_x
-\times
-\left((N+1)n_x+Nn_u\right)}.
-}
-$$
-
-The equality right-hand side is
-
-$$
-b_{QP}
-=
 \begin{bmatrix}
-x_0\\
-0\\
-\vdots\\
+x_0\
+0\
+\vdots\
 0
-\end{bmatrix}
+\end{bmatrix}.
 $$
 
-with dimension
+Thus, the first equality imposes $x_1=x_0$, while every remaining
+equality imposes the discrete-time dynamics.
+
+Simple Bound Construction
+
+The state bounds apply to every predicted state:
 
 $$
-\boxed{
-b_{QP}
-\in
-\mathbb{R}^{(N+1)n_x}.
-}
+x_{lb}\leq x_k\leq x_{ub},
+\qquad k=1,\ldots,n+1.
 $$
 
-The first \(n_x\) elements contain the current measured state \(x_0\). All remaining elements are zero.
-
----
-
-# 8. Conversion of the state and input bounds
-
-The variable bounds are represented directly on the decision vector.
-
-For the states,
+The input bounds apply to every control input:
 
 $$
-x_{lb}\le x_k\le x_{ub},
-\qquad
-k=1,\ldots,N+1.
+u_{lb}\leq u_k\leq u_{ub},
+\qquad k=1,\ldots,n.
 $$
 
-For the inputs,
+Because the decision vector is stacked in the same order as $w$, the
+bounds are stacked in the corresponding order:
 
-$$
-u_{lb}\le u_k\le u_{ub},
-\qquad
-k=1,\ldots,N.
-$$
-
-Therefore the complete lower bound is
-
-$$
-w_{lb}
-=
 \begin{bmatrix}
-x_{lb}\\
-\vdots\\
-x_{lb}\\
-u_{lb}\\
-\vdots\\
+x_{lb}\
+\vdots\
+x_{lb}\
+u_{lb}\
+\vdots\
 u_{lb}
 \end{bmatrix}
 $$
 
-and the complete upper bound is
+and
 
-$$
-w_{ub}
-=
 \begin{bmatrix}
-x_{ub}\\
-\vdots\\
-x_{ub}\\
-u_{ub}\\
-\vdots\\
+x_{ub}\
+\vdots\
+x_{ub}\
+u_{ub}\
+\vdots\
 u_{ub}
 \end{bmatrix}.
 $$
 
-Their dimensions are
+There are $n+1$ copies of each state bound and $n$ copies of each input
+bound.
+
+QP Matrix and Vector Dimensions
+
+The complete QP representation returned by generate_QP() has the
+following dimensions.
+
+Component                              Symbol                                  Dimension
+
+Decision vector                           $w$                  $((n+1)n_x+n n_u)\times1$
+
+Quadratic cost                       $H_{QP}$   $((n+1)n_x+n n_u)\times((n+1)n_x+n n_u)$
+matrix
+
+Linear cost vector                   $c_{QP}$                  $((n+1)n_x+n n_u)\times1$
+
+Equality matrix                      $A_{QP}$         $((n+1)n_x)\times((n+1)n_x+n n_u)$
+
+Equality RHS                         $b_{QP}$                        $((n+1)n_x)\times1$
+
+Lower bound                         $lb_{QP}$                  $((n+1)n_x+n n_u)\times1$
+
+Upper bound                         $ub_{QP}$                  $((n+1)n_x+n n_u)\times1$
+
+The QP is therefore represented by
 
 $$
-\boxed{
-w_{lb},w_{ub}
-\in
-\mathbb{R}^{n_w}.
-}
+\min_w
+\quad
+w^T H_{QP}w+c_{QP}^Tw
 $$
 
-Explicitly,
+subject to
 
 $$
-w_{lb}
-=
-\begin{bmatrix}
-x_{lb} \\
-\vdots \\
-x_{lb} \\
-u_{lb} \\
-\vdots \\
-u_{lb}
-\end{bmatrix},
-\qquad
-w_{ub}
-=
-\begin{bmatrix}
-x_{ub} \\
-\vdots \\
-x_{ub} \\
-u_{ub} \\
-\vdots \\
-u_{ub}
-\end{bmatrix},
-$$
-
-where the state bounds are repeated \(N+1\) times and the input bounds are repeated \(N\) times.
-
-No additional constraint matrix is required for these simple box constraints.
-
----
-
-# 9. Complete QP
-
-After stacking the states and inputs, the LMPC problem becomes the following structured QP:
-
-$$
-\boxed{
-\begin{aligned}
-\min_w\quad&
-\frac{1}{2}w^T H_{QP} w
-+
-c_{QP}^T w
-\\
-\text{s.t.}\quad&
-A_{QP}w=b_{QP},
-\\
-&
-w_{lb}\le w\le w_{ub}.
-\end{aligned}
-}
-$$
-
-The QP components have the following dimensions:
-
-| QP component |               Dimension | Description                |
-| ------------ | ----------------------: | -------------------------- |
-| \(w\)        |        \(n_w \times 1\) | Decision vector            |
-| \(H_{QP}\)   |      \(n_w \times n_w\) | Quadratic cost matrix      |
-| \(c_{QP}\)   |        \(n_w \times 1\) | Linear cost vector         |
-| \(A_{QP}\)   | \((N+1)n_x \times n_w\) | Equality constraint matrix |
-| \(b_{QP}\)   |   \((N+1)n_x \times 1\) | Equality constraint vector |
-| \(w_{lb}\)   |        \(n_w \times 1\) | Lower bounds               |
-| \(w_{ub}\)   |        \(n_w \times 1\) | Upper bounds               |
-
-where
-
-$$
-\boxed{
-n_w=(N+1)n_x+Nn_u.
-}
-$$
-
-The matrix \(H_{QP}\) is block diagonal and \(A_{QP}\) is block banded. This structure is what allows the lifted LMPC problem to be represented efficiently as a sparse QP.
-
----
-
-# 10. Sparse matrix structure
-
-The large QP matrices are constructed as sparse matrices.
-
-The Hessian has the structure
-
-$$
-H_{QP}
-=
-\operatorname{blkdiag}
-\left(
-Q,\ldots,Q,Q_{end},R,\ldots,R
-\right).
-$$
-
-Only the diagonal blocks are nonzero.
-
-The equality matrix has the block-banded structure
-
-$$
-A_{QP}
-=
-\begin{bmatrix}
-I & 0 & \cdots & 0 & 0 & \cdots & 0\\
--A & I & \cdots & 0 & -B & \cdots & 0\\
-0 & -A & \ddots & \vdots & 0 & \ddots & 0\\
-\vdots & \vdots & \ddots & I & 0 & \cdots & -B
-\end{bmatrix}.
-$$
-
-Even when \(A\) and \(B\) are dense matrices, the complete lifted matrix remains sparse because the dense blocks occupy only specific locations.
-
-The large matrices are therefore represented as SciPy CSC matrices, while the vectors remain dense NumPy arrays.
-
----
-
-# 11. Checks implemented by `LinearMPC`
-
-The class validates the LMPC data before constructing the QP.
-
-## Matrix dimensions
-
-The dimensions of all inputs are checked against `N`, `nx`, and `nu`.
-
-In particular:
-
-$$
-A\in\mathbb{R}^{n_x\times n_x}
-$$
-
-$$
-B\in\mathbb{R}^{n_x\times n_u}
-$$
-
-$$
-Q,Q_{end}\in\mathbb{R}^{n_x\times n_x}
-$$
-
-$$
-R\in\mathbb{R}^{n_u\times n_u}
-$$
-
-$$
-x_0,x_{lb},x_{ub}\in\mathbb{R}^{n_x\times1}
-$$
-
-$$
-u_{lb},u_{ub}\in\mathbb{R}^{n_u\times1}
-$$
-
-$$
-x_{ref}\in\mathbb{R}^{n_x\times(N+1)}
-$$
-
-$$
-u_{ref}\in\mathbb{R}^{n_u\times N}.
-$$
-
-An error is raised if any matrix or vector has an unexpected shape.
-
-## Symmetry of the weighting matrices
-
-The class checks that
-
-$$
-Q=Q^T
-$$
-
-$$
-Q_{end}=Q_{end}^T
+A_{QP}w=b_{QP}
 $$
 
 and
 
 $$
-R=R^T.
+lb_{QP}\leq w\leq ub_{QP}.
 $$
 
-## Positive semidefiniteness of \(Q\) and \(Q_{end}\)
+The returned dictionary contains these components under the keys:
 
-The class checks that the minimum eigenvalue satisfies
+H: $H_{QP}$
 
-$$
-\lambda_{\min}(Q)\geq -10^{-10}
-$$
+c: $c_{QP}$
 
-and
+A: $A_{QP}$
 
-$$
-\lambda_{\min}(Q_{end})\geq -10^{-10}.
-$$
+b: $b_{QP}$
 
-This ensures that the state and terminal cost contributions are convex up to the numerical tolerance used by the validation.
+lb: $lb_{QP}$
 
-## Positive definiteness of \(R\)
+ub: $ub_{QP}$
 
-The input weighting matrix is required to be positive definite:
+Validation Checks
 
-$$
-\lambda_{\min}(R)>10^{-10}.
-$$
+The LinearMPC model validates the problem data before the QP is
+generated.
 
-This ensures that the input cost is strictly convex in the control variables.
+Array Conversion
 
-## Bounds
+The model converts the matrix and vector inputs to NumPy arrays with
+float64 precision.
 
-The class checks that every lower bound is less than or equal to its corresponding upper bound:
+Cost Matrix Checks
+
+Q and Qend must:
+
+be symmetric;
+
+be positive semidefinite within the numerical tolerance used by the
+class.
+
+R must:
+
+be symmetric;
+
+be positive definite within the numerical tolerance used by the
+class.
+
+Dimension Checks
+
+The following dimensions are checked against nx, nu, and
+intervals:
+
+A: (nx, nx)
+
+B: (nx, nu)
+
+Q: (nx, nx)
+
+R: (nu, nu)
+
+Qend: (nx, nx)
+
+x0: (nx, 1)
+
+x_ref: (nx, n + 1)
+
+u_ref: (nu, n)
+
+x_lb: (nx, 1)
+
+x_ub: (nx, 1)
+
+u_lb: (nu, 1)
+
+u_ub: (nu, 1)
+
+Bound Checks
+
+The model verifies that
 
 $$
 x_{lb}\leq x_{ub}
@@ -773,4 +487,22 @@ $$
 u_{lb}\leq u_{ub}.
 $$
 
-The QP is constructed only after all of these checks have passed.
+An invalid bound produces a validation error before QP construction.
+
+Output Structure
+
+generate_QP() returns a dictionary containing the complete structured
+QP representation:
+
+{
+    "H":  H_QP,
+    "c":  c_QP,
+    "A":  A_QP,
+    "b":  b_QP,
+    "lb": lb_QP,
+    "ub": ub_QP,
+}
+
+This representation keeps the state and input ordering consistent across
+the objective, dynamics, and bounds, making the generated QP directly
+traceable to the original LMPC formulation.
