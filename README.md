@@ -2,12 +2,18 @@
 
 A Python implementation for formulating and generating sparse Quadratic Programming (QP) matrices for discrete-time Linear Model Predictive Control (LMPC). Built with `pydantic` for strict validation and `scipy.sparse` for scalable, memory-efficient matrix assembly.
 
-## Files
+## Files and requirements
 
 1. lmpc.py - parser to validate and return QP
 2. benchmark.py - demonstrate scalability to construct large sparse QP for large horizon
 3. closed_loop.py - simple 1sr order MPC example
 4. syscop_ex_3_2023.py - MPC problem from syscop course "Model Predictive Control for Renewable Energy System"
+
+* casadi
+* scipy
+* numpy
+* qpsolvers
+* pydantic
 
 ## Discrete LMPC Formulation
 
