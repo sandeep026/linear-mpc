@@ -14,6 +14,7 @@ A Python implementation for formulating and generating sparse Quadratic Programm
 * numpy
 * qpsolvers
 * pydantic
+* matplotlib
 
 ## Discrete LMPC Formulation
 
